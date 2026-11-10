@@ -7,9 +7,69 @@ Short for `claude`, with words for one-off settings. Nothing is written to setti
     cld opus max 600k     combine any of them
     cld big -- -c         after --, args go straight to claude
 
+## Install
+
+**Requirements**
+
+- [Claude Code](https://code.claude.com/docs/en/setup) (the `claude` command)
+- zsh (cld is a zsh function and does not run in bash or fish)
+- `git`
+- optional: `jq` for the JSON run report, `uuidgen` for exact session IDs.
+  Without them cld still works: it prints a one-line command and finds the session ID after exit.
+
+### macOS
+
+zsh, `jq` (macOS 15+) and `uuidgen` are already there.
+
+    git clone https://github.com/morethancoder/cld ~/cld
+    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
+    source ~/.zshrc
+
+On older macOS, add `jq` with `brew install jq`.
+
+### Linux
+
+Install zsh and jq (`uuidgen` comes with `util-linux`, present on most systems):
+
+    sudo apt install zsh jq uuid-runtime   # Debian / Ubuntu
+    sudo dnf install zsh jq util-linux     # Fedora
+    sudo pacman -S zsh jq util-linux       # Arch
+
+If zsh is not your shell yet, make it the default (then log out and back in):
+
+    chsh -s "$(command -v zsh)"
+
+Then install cld:
+
+    git clone https://github.com/morethancoder/cld ~/cld
+    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
+    source ~/.zshrc
+
+### Windows
+
+Use WSL (Windows Subsystem for Linux). PowerShell and cmd are not supported.
+
+    wsl --install          # in PowerShell, once; restart when asked
+
+Then open the Ubuntu terminal, install Claude Code inside WSL, and follow the Linux steps above.
+
+### Check it works
+
+    cld help
+
+### Update
+
+    git -C ~/cld pull && source ~/.zshrc
+
+### Uninstall
+
+Delete the `source ~/cld/cld.zsh` line from `~/.zshrc`, then `rm -rf ~/cld`.
+
+## What it prints
+
 Before claude starts, `cld` prints the run as pretty JSON (via `jq`): model, effort,
 autocompact, passthrough args, session ID, the `--settings` value laid out, and the exact
-`command` (shell-quoted, copy-pasteable). Bare `cld` prints nothing. Without `jq` it prints one line.
+`command` (shell-quoted, copy-pasteable). Bare `cld` prints nothing.
 
 When the session ends it prints how to get back, with the same words:
 
@@ -19,10 +79,8 @@ New sessions get their ID from `cld` (`--session-id`); `-c`/`--resume` runs are 
 in `~/.claude/projects/<folder>/` after exit. `-p` runs and subcommands (`cld -- mcp list`)
 print no resume line.
 
-Install: clone it and source it from `~/.zshrc` (zsh only; `jq` optional, for the JSON report):
+## Development
 
-    git clone https://github.com/morethancoder/cld ~/cld
-    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
-`make test` runs sample calls against a stub `claude` and checks the JSON, resume line and exit code.
+    make test     run sample calls against a stub `claude`; checks the JSON, resume line and exit code
 
 When a new model version ships, add its full ID to `CLD_MODEL_IDS` in `cld.zsh`.
