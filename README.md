@@ -91,7 +91,7 @@ Before claude starts, `cld` prints the run as pretty JSON (via `jq`): model, eff
 autocompact, passthrough args, session ID, the `--settings` value laid out, and the exact
 `command` (shell-quoted, copy-pasteable). Bare `cld` prints nothing.
 
-When the session ends it prints how to get back, with the same words:
+When the session ends (`/exit`, Ctrl+D or Ctrl+C) it prints how to get back, with the same words:
 
     ↩ resume: cld sonnet high -- --resume 3f2a…
 

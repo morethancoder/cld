@@ -115,10 +115,18 @@ EOF
     fi
   fi
 
-  local start=$EPOCHSECONDS
-  command claude "${flags[@]}" "${args[@]}"
-  local rc=$?
+  # `always`: when claude is quit with Ctrl+C it dies by SIGINT, and an interactive zsh then
+  # drops the rest of the function. The always block still runs, so the resume line prints.
+  local start=$EPOCHSECONDS rc
+  { command claude "${flags[@]}" "${args[@]}" } always {
+    rc=$?
+    _cld_resume_line
+  }
+  return $rc
+}
 
+# Print the command to resume the session that just ended (reads cld's locals).
+_cld_resume_line() {
   if (( track )); then
     local projects=${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects
     local -a found
@@ -130,7 +138,7 @@ EOF
     fi
     (( ${#found} )) && print -u2 "↩ resume: cld ${words:+${words} }-- --resume ${found[1]:t:r}"
   fi
-  return $rc
+  return 0
 }
 
 # `cld update`: pull the latest version and load it in this shell.

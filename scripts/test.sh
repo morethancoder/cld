@@ -16,6 +16,7 @@ while (( \$# )); do
   esac
   shift
 done
+[[ -n \$CLD_STUB_SIGINT ]] && kill -INT \$\$   # quit like Ctrl+C does
 exit 3
 EOF
 chmod +x $tmp/bin/claude
@@ -45,6 +46,19 @@ check "big sets autoCompactWindow 500000" $(( ! $? ))
 out=$(cld haiku -- -c 2>&1 </dev/null)
 [[ $out == *"↩ resume: cld haiku -- --resume 11111111-2222-3333-4444-555555555555"* ]]
 check "-c run finds the session ID after exit" $(( ! $? ))
+
+# Quit with Ctrl+C: claude dies by SIGINT. An interactive shell with job control (like
+# a real terminal) drops the rest of the function then, so run one over a pty.
+zmodload zsh/zpty
+zpty -b sigint "PATH=$tmp/bin:\$PATH CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR CLD_STUB_SIGINT=1 zsh -f -i"
+zpty -w sigint "setopt monitor; source ${0:A:h}/../cld.zsh; cld sonnet"
+zpty -w sigint "print DO''NE; exit"     # its own line, so it runs even if cld is cut short
+out=""; deadline=$(( SECONDS + 10 ))
+while [[ $out != *DONE* ]] && (( SECONDS < deadline )); do
+  zpty -r -t sigint line 2>/dev/null && out+=$line || sleep 0.05
+done
+zpty -d sigint
+check "resume line printed after Ctrl+C quit" $(( ${#${(M)out:#*↩ resume: cld sonnet -- --resume *}} ))
 
 # Extra model IDs from ~/.zshrc are added to the defaults, without duplicates.
 CLD_EXTRA_MODEL_IDS=(claude-opus-9-9 claude-opus-5-5)
