@@ -59,7 +59,17 @@ Then open the Ubuntu terminal, install Claude Code inside WSL, and follow the Li
 
 ### Update
 
-    git -C ~/cld pull && source ~/.zshrc
+    cld update
+
+It pulls the latest version and shows what changed. Other open terminals pick it up on their
+next `cld` call, no reload needed.
+
+### A model cld doesn't know yet
+
+`autocompact` words apply to the models listed in `cld.zsh`, which `cld update` keeps current.
+If a new model ships before that, add it in `~/.zshrc` (not in `cld.zsh`, so updates never conflict):
+
+    CLD_EXTRA_MODEL_IDS=(claude-opus-6-0)
 
 ### Uninstall
 
@@ -81,6 +91,8 @@ print no resume line.
 
 ## Development
 
-    make test     run sample calls against a stub `claude`; checks the JSON, resume line and exit code
+    make test     run sample calls against a stub `claude`; checks the JSON, resume line,
+                  exit code, extra model IDs, `cld update` and reload of open shells
 
-When a new model version ships, add its full ID to `CLD_MODEL_IDS` in `cld.zsh`.
+When a new model version ships, add its full ID to `CLD_MODEL_IDS` in `cld.zsh` and push:
+users get it with `cld update`.

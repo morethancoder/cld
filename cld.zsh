@@ -2,8 +2,14 @@
 # A bare `cld` just runs claude. `cld help` lists the words.
 
 # Full model IDs that get the autocompact size (settings are stored per ID).
-# Add the new ID here when a new model version comes out.
+# Kept up to date in the repo (`cld update`). Don't edit this file for a model that isn't
+# here yet: put it in ~/.zshrc instead, so updates never conflict:
+#   CLD_EXTRA_MODEL_IDS=(claude-opus-6-0)
 CLD_MODEL_IDS=(claude-opus-5-5 claude-sonnet-5-5 claude-haiku-5-5)
+
+# Where this file lives, and when it was loaded: `cld update` pulls here, and each
+# call reloads the file if it changed since, so already-open terminals stay current.
+CLD_DIR=${${(%):-%x}:A:h}
 
 # claude subcommands: these start no session, so cld adds no session ID and no resume line.
 CLD_SUBCOMMANDS=(agents attach auth auto-mode doctor gateway import install logs mcp plugin plugins
@@ -11,8 +17,16 @@ CLD_SUBCOMMANDS=(agents attach auth auto-mode doctor gateway import install logs
 
 zmodload zsh/datetime 2>/dev/null
 zmodload -F zsh/stat b:zstat 2>/dev/null   # only zstat, so the system `stat` stays
+CLD_LOADED=$(zstat +mtime -- $CLD_DIR/cld.zsh 2>/dev/null)
 
 cld() {
+  # The file changed since this shell loaded it (e.g. `cld update` in another terminal):
+  # load the new version and run that instead.
+  local now=$(zstat +mtime -- $CLD_DIR/cld.zsh 2>/dev/null)
+  if [[ -n $now && $now != $CLD_LOADED ]]; then
+    source $CLD_DIR/cld.zsh && { cld "$@"; return }
+  fi
+
   local model="" effort="" compact=""
   local -a words args
   while (( $# )); do
@@ -22,9 +36,11 @@ cld() {
       big)                          compact=500000; words+=$1 ;;
       huge)                         compact=800000; words+=$1 ;;
       <->k)                         compact=$(( ${1%k} * 1000 )); words+=$1 ;;
+      update)  _cld_update; return ;;
       help)
         cat <<'EOF'
 cld [words] [-- claude args]     one-off settings, nothing saved
+cld update                       get the latest cld
 
   model     opus | sonnet | haiku          (always the latest version)
   effort    low | medium | high | xhigh | max
@@ -54,7 +70,7 @@ EOF
   [[ -n $effort ]] && flags+=(--effort "$effort")
   if [[ -n $compact ]]; then
     local m json="" sep=""
-    for m in $CLD_MODEL_IDS; do
+    for m in ${(u)CLD_MODEL_IDS} ${(u)CLD_EXTRA_MODEL_IDS:|CLD_MODEL_IDS}; do
       json+="$sep\"$m\":{\"autoCompactWindow\":$compact}"; sep=","
     done
     settings="{\"modelSettings\":{$json}}"
@@ -115,4 +131,26 @@ EOF
     (( ${#found} )) && print -u2 "↩ resume: cld ${words:+${words} }-- --resume ${found[1]:t:r}"
   fi
   return $rc
+}
+
+# `cld update`: pull the latest version and load it in this shell.
+# Other open terminals pick it up on their next `cld` call.
+_cld_update() {
+  local old new
+  old=$(git -C $CLD_DIR rev-parse --short HEAD 2>/dev/null) || {
+    print -u2 "cld: $CLD_DIR is not a git clone, so it can't update itself (see the README to reinstall)"
+    return 1
+  }
+  if ! GIT_TERMINAL_PROMPT=0 git -C $CLD_DIR pull --ff-only -q < /dev/null; then
+    print -u2 "cld: update failed. Local edits in $CLD_DIR? Check: git -C $CLD_DIR status"
+    return 1
+  fi
+  new=$(git -C $CLD_DIR rev-parse --short HEAD)
+  if [[ $old == $new ]]; then
+    print "cld is up to date ($new)"
+    return
+  fi
+  source $CLD_DIR/cld.zsh
+  print "cld updated $old → $new"
+  git -C $CLD_DIR log --format='  %s' $old..$new
 }
