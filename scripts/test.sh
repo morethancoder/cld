@@ -69,4 +69,17 @@ check "second cld update says up to date" $(( ${#${(M)out:#*up to date*}} ))
 print 'CLD_MARKER=reloaded' >> $tmp/inst/cld.zsh; touch -t 203001010000 $tmp/inst/cld.zsh
 cld big >/dev/null 2>&1 </dev/null
 [[ $CLD_MARKER == reloaded ]]; check "changed file reloads on next cld call" $(( ! $? ))
+
+# install.sh: fresh install into a fake HOME, run twice, then refuse a non-cld folder.
+inst_env=(HOME=$tmp/home ZDOTDIR= CLD_REPO=${0:A:h}/.. CLD_INSTALL_DIR=$tmp/home/cld)
+mkdir -p $tmp/home
+env $inst_env sh ${0:A:h}/../install.sh </dev/null >/dev/null 2>&1
+[[ -f $tmp/home/cld/cld.zsh ]]; check "install.sh clones cld" $(( ! $? ))
+env $inst_env sh ${0:A:h}/../install.sh </dev/null >/dev/null 2>&1
+check "running it twice adds the .zshrc line once" $(( $(grep -c 'cld/cld.zsh' $tmp/home/.zshrc) == 1 ))
+out=$(env HOME=$tmp/home ZDOTDIR=$tmp/home zsh -ic 'cld help' 2>&1 </dev/null)
+check "a new zsh in that HOME knows cld" $(( ${#${(M)out:#*one-off settings*}} ))
+mkdir -p $tmp/other
+env $inst_env CLD_INSTALL_DIR=$tmp/other sh ${0:A:h}/../install.sh </dev/null >/dev/null 2>&1
+check "refuses a folder that is not a cld clone" $(( $? == 1 ))
 exit $fail

@@ -9,6 +9,13 @@ Short for `claude`, with words for one-off settings. Nothing is written to setti
 
 ## Install
 
+One line, on any system below once zsh and git are there:
+
+    curl -fsSL https://raw.githubusercontent.com/morethancoder/cld/main/install.sh | sh
+
+It clones cld into `~/cld` and adds one line to `~/.zshrc`. Safe to run again (it updates).
+Open a new terminal afterwards. Other folder: `CLD_INSTALL_DIR=~/tools/cld` before `sh`.
+
 **Requirements**
 
 - [Claude Code](https://code.claude.com/docs/en/setup) (the `claude` command)
@@ -19,11 +26,9 @@ Short for `claude`, with words for one-off settings. Nothing is written to setti
 
 ### macOS
 
-zsh, `jq` (macOS 15+) and `uuidgen` are already there.
+zsh, `jq` (macOS 15+) and `uuidgen` are already there. Just run the installer:
 
-    git clone https://github.com/morethancoder/cld ~/cld
-    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
-    source ~/.zshrc
+    curl -fsSL https://raw.githubusercontent.com/morethancoder/cld/main/install.sh | sh
 
 On older macOS, add `jq` with `brew install jq`.
 
@@ -39,11 +44,9 @@ If zsh is not your shell yet, make it the default (then log out and back in):
 
     chsh -s "$(command -v zsh)"
 
-Then install cld:
+Then run the installer:
 
-    git clone https://github.com/morethancoder/cld ~/cld
-    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
-    source ~/.zshrc
+    curl -fsSL https://raw.githubusercontent.com/morethancoder/cld/main/install.sh | sh
 
 ### Windows
 
@@ -52,6 +55,13 @@ Use WSL (Windows Subsystem for Linux). PowerShell and cmd are not supported.
     wsl --install          # in PowerShell, once; restart when asked
 
 Then open the Ubuntu terminal, install Claude Code inside WSL, and follow the Linux steps above.
+
+### Manual install
+
+If you'd rather not pipe a script into `sh` (read [install.sh](install.sh) first, it's short):
+
+    git clone https://github.com/morethancoder/cld ~/cld
+    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
 
 ### Check it works
 
@@ -73,7 +83,7 @@ If a new model ships before that, add it in `~/.zshrc` (not in `cld.zsh`, so upd
 
 ### Uninstall
 
-Delete the `source ~/cld/cld.zsh` line from `~/.zshrc`, then `rm -rf ~/cld`.
+Delete the cld line from `~/.zshrc`, then `rm -rf ~/cld`.
 
 ## What it prints
 
@@ -92,7 +102,8 @@ print no resume line.
 ## Development
 
     make test     run sample calls against a stub `claude`; checks the JSON, resume line,
-                  exit code, extra model IDs, `cld update` and reload of open shells
+                  exit code, extra model IDs, `cld update`, reload of open shells
+                  and install.sh
 
 When a new model version ships, add its full ID to `CLD_MODEL_IDS` in `cld.zsh` and push:
 users get it with `cld update`.
