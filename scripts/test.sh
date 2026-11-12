@@ -61,21 +61,23 @@ check() {  # check <name> <condition result>
 has() { [[ $1 == *$2* ]] && print 1 || print 0 }   # has <text> <part>
 
 print "── words, report, resume line"
-for words in "sonnet 200k" "opus max 600k" "big" "haiku -- -c" "-- mcp list" "-- -p hi"; do
+for words in "sonnet 200k" "opus max 600k" "big" "haiku 300k -- -c" "sonnet high" "-- mcp list" "-- -p hi"; do
   print "\$ cld $words"
   out=$(cld ${=words} 2>&1 < /dev/null); rc=$?
   print -r -- "$out" | sed 's/^/    /'
   check "exit code passed through" $(( rc == 3 ))
   json=${out%%$'\n'↩*}
-  if [[ $words != "-- mcp list" && $words != "-- -p hi" ]]; then
+  if [[ $words == "sonnet high" ]]; then
+    check "no window word or as: claude's own resume line is enough, none from cld" $(( ! $(has "$out" "↩") ))
+  elif [[ $words != "-- mcp list" && $words != "-- -p hi" ]]; then
     check "report is valid JSON with a command" $(( $(print -r -- "$json" | jq -e '.command | test("claude ")' >/dev/null && echo 1 || echo 0) ))
     check "resume line printed" $(( ${#${(M)out:#*↩ resume: cld *-- --resume *}} ))
   else
     check "no session ID or resume line" $(( ! ${#${(M)out:#*(session-id|↩)*}} ))
   fi
 done
-out=$(cld haiku -- -c 2>&1 </dev/null)
-check "-c run finds the session ID after exit" $(has "$out" "↩ resume: cld haiku -- --resume 11111111-2222-3333-4444-555555555555")
+out=$(cld haiku 300k -- -c 2>&1 </dev/null)
+check "-c run finds the session ID after exit" $(has "$out" "↩ resume: cld haiku 300k -- --resume 11111111-2222-3333-4444-555555555555")
 rm -f $CLD_STUB_LOG; out=$(cld 2>&1 </dev/null); rc=$?
 check "bare cld: plain claude, no report, same config (AC14)" $(( rc == 3 && ! $(has "$out" "{") && $(has "$(log config)" "$CLAUDE_CONFIG_DIR") && ${#$(log token)} == 0 ))
 
@@ -96,8 +98,8 @@ cld fable >/dev/null 2>&1 </dev/null;      check "fable = latest (alias)"       
 cld zeta >/dev/null 2>&1 </dev/null;       check "a family cld never heard of"   $(has "$(log args)" "--model zeta ")
 cld fable 5.2 >/dev/null 2>&1 </dev/null;  check "fable 5.2 = claude-fable-5-2"  $(has "$(log args)" "--model claude-fable-5-2 ")
 cld fable-5.1 >/dev/null 2>&1 </dev/null;  check "fable-5.1 = claude-fable-5-1"  $(has "$(log args)" "--model claude-fable-5-1 ")
-out=$(cld fable 5.2 high 2>&1 </dev/null)
-check "resume line keeps the version" $(has "$out" "↩ resume: cld fable 5.2 high -- --resume")
+out=$(cld fable 5.2 high big 2>&1 </dev/null)
+check "resume line keeps the version" $(has "$out" "↩ resume: cld fable 5.2 high big -- --resume")
 out=$(cld fable 9.9 2>&1 </dev/null); rc=$?
 check "unlisted version: warns and still runs" $(( rc == 3 && $(has "$out" "doesn't list claude-fable-9-9") && $(has "$(log args)" "--model claude-fable-9-9 ") ))
 cld sonnet turbo >/dev/null 2>&1 </dev/null
@@ -174,14 +176,14 @@ YES=1 cld drop nope >/dev/null 2>&1; check "drop of an unknown name is an error"
 print "── a real command (AC28, 34)"
 # Quit with Ctrl+C in a real terminal (job control on): the resume line must still print.
 zpty -b sigint "PATH=$tmp/bin:\$PATH CLD_STUB_SIGINT=1 exec zsh -f -i"
-zpty -w sigint "setopt monitor; $root/cld sonnet"
+zpty -w sigint "setopt monitor; $root/cld sonnet 200k"
 zpty -w sigint "print DO''NE; exit"
 out=""; deadline=$(( SECONDS + 10 ))
 while [[ $out != *DONE* ]] && (( SECONDS < deadline )); do
   zpty -r -t sigint line 2>/dev/null && out+=$line || sleep 0.05
 done
 zpty -d sigint
-check "resume line printed after Ctrl+C quit" $(( ${#${(M)out:#*↩ resume: cld sonnet -- --resume *}} ))
+check "resume line printed after Ctrl+C quit" $(( ${#${(M)out:#*↩ resume: cld sonnet 200k -- --resume *}} ))
 out=$(bash -c "'$root/cld' fable 5.2; echo rc=\$?" 2>&1 </dev/null)
 check "runs from bash, exit code passed through" $(( $(has "$out" "rc=3") && $(has "$out" claude-fable-5-2) ))
 print "#!/bin/sh\n'$root/cld' sonnet" > $tmp/s.sh; sh $tmp/s.sh >/dev/null 2>&1 </dev/null

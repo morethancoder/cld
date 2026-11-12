@@ -129,13 +129,17 @@ autocompact, `temp` or the profile name with its config folder, passthrough args
 and the exact `command` (shell-quoted, copy-pasteable; for `temp` and `as` it leaves out the
 login token). Bare `cld` prints nothing.
 
-When the session ends (`/exit`, Ctrl+D or Ctrl+C) it prints how to get back, with the same words:
+Claude Code prints its own resume line when a session ends. It repeats `--model` and
+`--effort` but not the autocompact window (an env var, not saved with the session), and it
+can't find sessions made with `cld as <name>`. So when the run used a window word (`200k`,
+`big`…) or `as <name>`, `cld` adds its own line after Claude's, with the same words:
 
-    ↩ resume: cld sonnet high -- --resume 3f2a…
+    ↩ resume: cld sonnet 200k -- --resume 3f2a…
 
 New sessions get their ID from `cld` (`--session-id`); `-c`/`--resume` runs are looked up
 in `~/.claude/projects/<folder>/` after exit (for `cld as work`, in that Claude's own folder).
-`-p` runs, subcommands (`cld -- mcp list`) and `cld temp` print no resume line.
+Runs without a window word or `as`, `-p` runs, subcommands (`cld -- mcp list`) and `cld temp`
+get no `cld` resume line.
 
 ## Development
 

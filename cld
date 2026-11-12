@@ -132,7 +132,8 @@ cld login                 renew the login used by temp and as (asked for automat
 cld update                get the latest cld
 
 Before it starts, cld prints the run as JSON (with the exact command).
-When the session ends, it prints the command to resume it.
+When a session with a window word or as <name> ends, it prints the command to resume it
+(claude's own resume line would lose those).
 EOF
 }
 
@@ -320,8 +321,10 @@ start=$EPOCHSECONDS
 env "${envs[@]}" claude "${flags[@]}" "${args[@]}"
 rc=$?
 
-# The command to resume the session that just ended.
-if (( track )) && [[ $mode != temp ]]; then
+# The command to resume the session that just ended. Claude prints its own resume line, but
+# it has no autocompact window (an env var, not saved with the session) and no config folder
+# for `as <name>`, so cld prints one only when it would lose one of those.
+if (( track )) && [[ $mode != temp ]] && [[ -n $compact || $mode == as ]]; then
   projects=${config:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects
   typeset -a found
   if [[ -n $sid ]]; then
