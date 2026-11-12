@@ -1,0 +1,336 @@
+#!/usr/bin/env zsh
+# cld: short for claude, with words for one-off settings. Nothing is saved to settings.json.
+# A bare `cld` just runs claude. `cld help` lists the words.
+#
+# Nothing about models or effort levels is typed in here: cld reads them from the installed
+# claude (its model IDs, and the levels in `claude --help`) and caches them per claude build.
+emulate -L zsh
+setopt extended_glob no_unset pipe_fail
+zmodload zsh/datetime 2>/dev/null
+zmodload -F zsh/stat b:zstat 2>/dev/null   # only zstat, so the system `stat` stays
+
+CLD_DIR=${0:A:h}                           # the clone this script lives in (symlinks resolved)
+CLD_HOME=${CLD_HOME:-$HOME/.cld}           # profiles, cache, token file
+CLD_TOKEN_NAME=clawd-oauth-token           # Keychain entry (the name the old clawd used)
+
+# claude subcommands: these start no session, so cld adds no session ID and no resume line.
+CLD_SUBCOMMANDS=(agents attach auth auto-mode doctor gateway import install logs mcp plugin plugins
+                 purge respawn rm setup-token stop kill ultrareview update upgrade)
+CLD_FALLBACK_EFFORTS=(low medium high xhigh max)   # only if `claude --help` can't be read
+
+typeset -a ids families efforts
+typeset claude_version=""
+
+die() { print -u2 "cld: $*"; exit 1 }
+
+# ── what the installed claude knows ──────────────────────────────────────────────────────────
+# Fills ids (claude-fable-5-2 …), families (fable opus …), efforts and claude_version.
+# Read from the claude program itself and cached; the cache is rebuilt when claude changes.
+_cld_discover() {
+  local bin=${commands[claude]:-}
+  [[ -n $bin ]] || { efforts=($CLD_FALLBACK_EFFORTS); return 0 }
+  bin=${bin:A}
+  local key="$bin $(zstat +mtime -- $bin 2>/dev/null)" cache=$CLD_HOME/cache/claude
+  local -A c
+  if [[ -r $cache ]]; then
+    local l
+    for l in "${(@f)$(<$cache)}"; do c[${l%%=*}]=${l#*=}; done
+  fi
+  if [[ ${c[key]:-} != $key ]]; then
+    c=(key "$key")
+    # A model ID is claude-<family>-<major>[-<minor>]. Keep the ones named at least twice
+    # (drops stray matches), then only families that have a dotted version (drops non-models).
+    local -a raw=(${(f)"$(LC_ALL=C grep -a -o -E 'claude-[a-z]+-[0-9]+(-[0-9]+)?' $bin 2>/dev/null |
+      LC_ALL=C grep -x -E 'claude-[a-z]+-[0-9]{1,2}(-[0-9]{1,2})?' | sort | uniq -c |
+      awk '$1 >= 2 { print $2 }')"})
+    local -a dotted=(${(M)raw:#claude-[a-z]##-<->-<->})
+    local -aU fams=(${${dotted#claude-}%%-*})
+    local id; local -a keep
+    for id in $raw; do (( ${fams[(Ie)${${id#claude-}%%-*}]} )) && keep+=$id; done
+    c[ids]="$keep"
+    # `claude --help` names the levels in brackets after --effort: "(low, medium, high)".
+    local eff="${(j: :)${(f)"$(command claude --help 2>/dev/null </dev/null | grep -A2 -e '--effort')"}}"
+    eff=${${eff#*\(}%%\)*}
+    [[ $eff == [a-z]##(, [a-z]##)## ]] && c[efforts]=$eff || c[efforts]=""
+    c[version]=${"$(command claude --version 2>/dev/null </dev/null)"%% *}
+    if mkdir -p ${cache:h} 2>/dev/null; then
+      print -r -l -- "key=${c[key]}" "ids=${c[ids]}" "efforts=${c[efforts]}" "version=${c[version]}" >| $cache
+    fi
+  fi
+  ids=(${=c[ids]:-})
+  families=(${(u)${${ids#claude-}%%-*}})
+  efforts=(${(s:, :)c[efforts]:-})
+  (( ${#efforts} )) || efforts=($CLD_FALLBACK_EFFORTS)
+  claude_version=${c[version]:-}
+}
+
+# Versions of one family, newest last: "5 5.1 5.2".
+_cld_versions() {
+  local id; local -a v
+  for id in ${(M)ids:#claude-$1-*}; do v+=${${id#claude-$1-}//-/.}; done
+  print -r -- ${(n)v}
+}
+
+# ── login: one long-lived token for temp and kept Claudes ────────────────────────────────────
+# Stored in the macOS Keychain, or in a file only you can read (Linux, or CLD_TOKEN_STORE=file).
+_cld_store() {
+  if [[ ${CLD_TOKEN_STORE:-} == (file|keychain) ]]; then print $CLD_TOKEN_STORE
+  elif (( $+commands[security] )); then print keychain
+  else print file; fi
+}
+_cld_token() {
+  if [[ $(_cld_store) == keychain ]]; then
+    security find-generic-password -a "$USER" -s $CLD_TOKEN_NAME -w 2>/dev/null
+  else
+    [[ -r $CLD_HOME/token ]] && print -r -- "$(<$CLD_HOME/token)"
+  fi
+  return 0
+}
+_cld_login() {
+  [[ -t 0 ]] || die "login needs a terminal. Run: cld login"
+  print "A browser window opens: approve it. Then copy the long token Claude Code prints."
+  command claude setup-token || return 1
+  local t=""
+  read -rs "t?Paste the token here (hidden): "; print
+  [[ -n $t ]] || { print -u2 "cld: nothing pasted, nothing saved"; return 1 }
+  if [[ $(_cld_store) == keychain ]]; then
+    security add-generic-password -U -a "$USER" -s $CLD_TOKEN_NAME -w "$t" || return 1
+    print "Saved in your Keychain as $CLD_TOKEN_NAME."
+  else
+    mkdir -p $CLD_HOME && ( umask 077; print -r -- "$t" >| $CLD_HOME/token ) && chmod 600 $CLD_HOME/token || return 1
+    print "Saved in $CLD_HOME/token (readable only by you)."
+  fi
+}
+
+# ── small commands ───────────────────────────────────────────────────────────────────────────
+_cld_help() {
+  _cld_discover
+  local fam="${(j: | :)families}"; [[ -n $fam ]] || fam="any model name claude accepts"
+  cat <<EOF
+cld [words] [-- claude args]     one-off settings, nothing saved
+
+  model     $fam
+            alone = latest version; exact: fable 5.2 or fable-5.2   (cld models lists them)
+  effort    ${(j: | :)efforts}
+  compact   big (500k) | huge (800k) | <N>k  e.g. 350k
+  temp      a clean Claude: none of your skills, plugins, memory or settings; deleted on exit
+  as <name> a separate Claude that is kept: its own settings, memory and sessions
+
+  cld                     plain claude
+  cld big                 500k autocompact
+  cld sonnet high         Sonnet, high effort
+  cld fable 5.2 max 600k  combine any of them
+  cld temp                throwaway Claude
+  cld as work opus        the kept Claude called work, on Opus
+  cld big -- -c           after --, args go straight to claude (here: continue last session)
+  cld -c                  flags starting with - also pass through
+
+cld models                models and versions your claude knows
+cld profiles              list the kept Claudes
+cld drop <name>           delete a kept Claude
+cld login                 renew the login used by temp and as (asked for automatically once)
+cld update                get the latest cld
+
+Before it starts, cld prints the run as JSON (with the exact command).
+When the session ends, it prints the command to resume it.
+EOF
+}
+
+_cld_models() {
+  _cld_discover
+  (( ${#families} )) || die "could not read the model list from claude (is claude installed?)"
+  local f
+  for f in $families; do print -r -- "${(r:8:)f} $(_cld_versions $f)"; done
+}
+
+_cld_name_ok() { [[ ${1:-} == [A-Za-z0-9_-]## ]] }
+
+_cld_profiles() {
+  local -a p=($CLD_HOME/profiles/*(N/:t))
+  (( ${#p} )) && print -r -l -- $p
+  return 0
+}
+
+_cld_drop() {
+  _cld_name_ok "${1:-}" || die "drop needs a name (letters, digits, - and _): cld drop work"
+  local dir=$CLD_HOME/profiles/$1
+  [[ -d $dir ]] || die "no kept Claude called '$1' (see: cld profiles)"
+  local ans=n
+  if [[ ${YES:-} == 1 ]]; then ans=y
+  elif [[ -t 0 ]]; then read -r "ans?Delete the kept Claude '$1' with its settings, memory and sessions? [y/N] "
+  fi
+  [[ $ans == (y|Y|yes) ]] || { print -u2 "cld: '$1' not deleted"; return 1 }
+  rm -rf -- $dir && print "deleted $1"
+}
+
+# `cld update`: pull the latest version. cld is a command, so every terminal has it at once.
+_cld_update() {
+  local old new
+  old=$(git -C $CLD_DIR rev-parse --short HEAD 2>/dev/null) ||
+    die "$CLD_DIR is not a git clone, so it can't update itself (see the README to reinstall)"
+  GIT_TERMINAL_PROMPT=0 git -C $CLD_DIR pull --ff-only -q < /dev/null ||
+    die "update failed. Local edits in $CLD_DIR? Check: git -C $CLD_DIR status"
+  new=$(git -C $CLD_DIR rev-parse --short HEAD)
+  if [[ $old == $new ]]; then
+    print "cld is up to date ($new)"
+  else
+    print "cld updated $old → $new"
+    git -C $CLD_DIR log --format='  %s' $old..$new
+  fi
+}
+
+# ── read the words ───────────────────────────────────────────────────────────────────────────
+case ${1:-} in
+  help)     _cld_help; exit ;;
+  models)   _cld_models; exit ;;
+  profiles) _cld_profiles; exit ;;
+  drop)     _cld_drop "${2:-}"; exit ;;
+  login)    _cld_login; exit ;;
+  update)   _cld_update; exit ;;
+esac
+
+_cld_discover
+
+model="" effort="" compact="" mode="" profile=""
+typeset -a words args
+while (( $# )); do
+  case $1 in
+    temp)
+      [[ -z $mode ]] || die "use temp or as <name>, not both"
+      mode=temp; words+=$1 ;;
+    as)
+      [[ -z $mode ]] || die "use temp or as <name>, not both"
+      _cld_name_ok "${2:-}" || die "as needs a name (letters, digits, - and _): cld as work"
+      mode=as; profile=$2; words+=($1 $2); shift ;;
+    big)   compact=500000; words+=$1 ;;
+    huge)  compact=800000; words+=$1 ;;
+    <->k)  compact=$(( ${1%k} * 1000 )); words+=$1 ;;
+    --)    shift; args+=("$@"); break ;;
+    -*)    args+=("$1") ;;
+    *)
+      if (( ${efforts[(Ie)$1]} )); then
+        effort=$1; words+=$1
+      elif (( ${families[(Ie)$1]} )); then                  # fable   or   fable 5.2
+        model=$1; words+=$1
+        if [[ ${2:-} == <->(.<->|) ]]; then
+          model=claude-$1-${2//./-}; words+=$2; shift
+        fi
+      elif [[ $1 == [a-z]##-<->([.-]<->|) ]] && (( ${families[(Ie)${1%%-*}]} )); then   # fable-5.2
+        model=claude-${1//./-}; words+=$1
+      elif (( ! ${#families} )) && [[ -z $model && $1 == [a-z][a-z0-9.-]# ]]; then
+        model=$1; words+=$1          # no model list to check against: let claude decide
+      else
+        die "unknown word '$1' (try: cld help)"
+      fi ;;
+  esac
+  shift
+done
+
+if [[ $model == claude-* ]] && (( ${#ids} )) && (( ! ${ids[(Ie)$model]} )); then
+  local_fam=${${model#claude-}%%-*}
+  print -u2 "cld: your claude doesn't list $model (it knows $local_fam $(_cld_versions $local_fam)); trying it anyway"
+fi
+
+# ── build the run ────────────────────────────────────────────────────────────────────────────
+typeset -a flags envs shown
+[[ -n $model  ]] && flags+=(--model "$model")
+[[ -n $effort ]] && flags+=(--effort "$effort")
+# Autocompact for whatever model runs, so no list of model IDs is needed.
+[[ -n $compact ]] && envs+=(CLAUDE_CODE_AUTO_COMPACT_WINDOW=$compact)
+
+config=""                                   # the separate config folder, if any
+tmpbase=${${TMPDIR:-/tmp}%/}
+if [[ -n $mode ]]; then
+  token=${CLAUDE_CODE_OAUTH_TOKEN:-$(_cld_token)}
+  if [[ -z $token ]]; then
+    [[ -t 0 ]] || die "no saved login for temp and as. Run: cld login"
+    print -u2 "cld: temp and as need a one-time login."
+    _cld_login || exit 1
+    token=$(_cld_token)
+    [[ -n $token ]] || die "login was not saved"
+  fi
+  if [[ $mode == temp ]]; then
+    config=$(mktemp -d $tmpbase/cld-temp.XXXXXX) || die "could not make a temp folder"
+  else
+    config=$CLD_HOME/profiles/$profile
+    mkdir -p $config || die "could not make $config"
+  fi
+  if [[ ! -e $config/.claude.json ]]; then   # skip the first-run screens and plugin auto-install
+    print -r -- "{\"hasCompletedOnboarding\":true,\"lastOnboardingVersion\":\"$claude_version\",\"lastReleaseNotesSeen\":\"$claude_version\",\"officialMarketplaceAutoInstallAttempted\":true}" > $config/.claude.json
+    [[ -e $config/settings.json ]] || print '{"theme":"dark"}' > $config/settings.json
+  fi
+  envs+=(CLAUDE_CONFIG_DIR=$config)
+  shown=($envs)                              # the token is passed on but never printed
+  envs+=(CLAUDE_CODE_OAUTH_TOKEN=$token)
+else
+  shown=($envs)
+fi
+
+# Delete the temp folder: only one we made, inside the temp directory, named cld-temp.*
+_cld_cleanup() {
+  [[ $mode == temp && -n $config && -d $config && $config == $tmpbase/cld-temp.* ]] && rm -rf -- $config
+  return 0
+}
+
+# Session ID. A new interactive session gets one from us, so it is exact.
+# Continue/resume runs pick their own, so we look it up after exit instead.
+# Print mode and subcommands start no session to come back to; temp sessions are deleted.
+sid="" track=1 lookup=0
+for a in $args; do
+  case $a in
+    -p|--print)                                   track=0 ;;
+    -c|--continue|-r|--resume|--resume=*|--session-id|--session-id=*|--fork-session) lookup=1 ;;
+  esac
+done
+(( ${#args} )) && (( ${CLD_SUBCOMMANDS[(Ie)${args[1]}]} )) && track=0
+if (( track && ! lookup )); then
+  sid=${(L)$(uuidgen 2>/dev/null)}             # no uuidgen: look it up after exit
+  [[ -n $sid ]] && flags+=(--session-id "$sid")
+fi
+
+typeset -a cmd=(claude "${flags[@]}" "${args[@]}")
+if (( ${#words} + ${#args} )); then
+  line="${shown:+${(j: :)${(@q-)shown}} }${(j: :)${(@q-)cmd}}"
+  if (( $+commands[jq] )); then
+    color=-M; [[ -t 2 ]] && color=-C
+    jq -n $color \
+      --arg model "$model" --arg effort "$effort" --arg compact "$compact" \
+      --arg mode "${profile:-$mode}" --arg config "$config" \
+      --arg pass "${(pj:\x1f:)args}" --arg sid "$sid" --arg command "$line" '{
+        model: $model,
+        effort: $effort,
+        autoCompactWindow: (($compact | tonumber?) // ""),
+        profile: $mode,
+        configDir: $config,
+        passthrough: (if $pass == "" then [] else ($pass | split("\u001f")) end),
+        sessionId: $sid,
+        command: $command
+      } | with_entries(select(.value != "" and .value != []))' >&2
+  else
+    print -u2 "→ $line"
+  fi
+fi
+
+# ── run claude ───────────────────────────────────────────────────────────────────────────────
+# Ctrl+C reaches claude and this script together. The empty handler keeps the script alive
+# until claude has quit, so the temp folder is still deleted and the resume line still prints.
+trap ':' INT
+trap '_cld_cleanup; exit 143' TERM HUP
+start=$EPOCHSECONDS
+env "${envs[@]}" claude "${flags[@]}" "${args[@]}"
+rc=$?
+
+# The command to resume the session that just ended.
+if (( track )) && [[ $mode != temp ]]; then
+  projects=${config:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects
+  typeset -a found
+  if [[ -n $sid ]]; then
+    found=($projects/*/$sid.jsonl(N))          # only if the session was saved
+  else
+    found=($projects/${${PWD:A}//[^a-zA-Z0-9]/-}/*.jsonl(N.om[1]))
+    (( ${#found} )) && (( $(zstat +mtime -- $found[1]) >= start )) || found=()
+  fi
+  (( ${#found} )) && print -u2 "↩ resume: cld ${words:+${words} }-- --resume ${found[1]:t:r}"
+fi
+_cld_cleanup
+exit $rc

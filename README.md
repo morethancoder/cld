@@ -2,10 +2,44 @@
 
 Short for `claude`, with words for one-off settings. Nothing is written to settings.json.
 
-    cld help              list the words
-    cld sonnet 200k       Sonnet, 200k autocompact
-    cld opus max 600k     combine any of them
-    cld big -- -c         after --, args go straight to claude
+    cld help                 list the words
+    cld sonnet 200k          Sonnet, 200k autocompact
+    cld fable 5.2 max 600k   an exact version, max effort, 600k: combine any of them
+    cld temp                 a clean, throwaway Claude
+    cld as work              a separate Claude that is kept
+    cld big -- -c            after --, args go straight to claude
+
+## Models and effort
+
+cld has no list of models. It reads the model families and versions from the `claude` you have
+installed, and the effort levels from `claude --help`, so a new model works the day you update
+claude.
+
+    cld fable             the latest Fable
+    cld fable 5.2         exactly claude-fable-5-2 (also: cld fable-5.2)
+    cld models            every family and version your claude knows
+
+A version your claude doesn't list still runs, with a one-line warning. A word that is no
+model, effort level or cld word is an error, so typos don't start a session.
+
+Autocompact words (`big`, `huge`, `350k`) apply to whichever model runs. Claude Code accepts
+100k to 1M.
+
+## Temporary and separate Claudes
+
+    cld temp              a Claude with an empty config folder: none of your skills, plugins,
+                          memory, CLAUDE.md or settings. The folder is deleted when it ends.
+    cld as work           a Claude with its own kept folder, ~/.cld/profiles/work. What you set
+                          up inside it (settings, memory, sessions) is there next time.
+    cld profiles          list the kept ones
+    cld drop work         delete one (asks first; YES=1 skips the question)
+
+Both combine with every other word: `cld as work sonnet high`, `cld temp big -- -p "hi"`.
+
+A Claude with its own config folder can't use your normal login, so `temp` and `as` share one
+long-lived token. The first time, cld runs the login for you (`claude setup-token`) and saves
+the token: in the Keychain on macOS, in `~/.cld/token` (readable only by you) on Linux.
+`cld login` renews it. The token is never printed.
 
 ## Install
 
@@ -13,13 +47,18 @@ One line, on any system below once zsh and git are there:
 
     curl -fsSL https://raw.githubusercontent.com/morethancoder/cld/main/install.sh | sh
 
-It clones cld into `~/cld` and adds one line to `~/.zshrc`. Safe to run again (it updates).
-Open a new terminal afterwards. Other folder: `CLD_INSTALL_DIR=~/tools/cld` before `sh`.
+It clones cld into `~/cld` and links the `cld` command into `~/.local/bin`. Nothing is loaded
+from `~/.zshrc`; if `~/.local/bin` is not on your PATH yet, the installer adds it to your
+shell's startup file. Safe to run again (it updates). Other places: `CLD_INSTALL_DIR=~/tools/cld`
+and `CLD_BIN_DIR=~/bin` before `sh`.
+
+Coming from an older version that was loaded from `~/.zshrc`? Run the installer once more: it
+links the command and removes that line.
 
 **Requirements**
 
 - [Claude Code](https://code.claude.com/docs/en/setup) (the `claude` command)
-- zsh (cld is a zsh function and does not run in bash or fish)
+- zsh installed (cld is written in zsh; you can call it from any shell)
 - `git`
 - optional: `jq` for the JSON run report, `uuidgen` for exact session IDs.
   Without them cld still works: it prints a one-line command and finds the session ID after exit.
@@ -40,11 +79,7 @@ Install zsh and jq (`uuidgen` comes with `util-linux`, present on most systems):
     sudo dnf install zsh jq util-linux     # Fedora
     sudo pacman -S zsh jq util-linux       # Arch
 
-If zsh is not your shell yet, make it the default (then log out and back in):
-
-    chsh -s "$(command -v zsh)"
-
-Then run the installer:
+zsh only has to be installed; it does not have to be your shell. Then run the installer:
 
     curl -fsSL https://raw.githubusercontent.com/morethancoder/cld/main/install.sh | sh
 
@@ -61,7 +96,7 @@ Then open the Ubuntu terminal, install Claude Code inside WSL, and follow the Li
 If you'd rather not pipe a script into `sh` (read [install.sh](install.sh) first, it's short):
 
     git clone https://github.com/morethancoder/cld ~/cld
-    echo 'source ~/cld/cld.zsh' >> ~/.zshrc
+    mkdir -p ~/.local/bin && ln -s ~/cld/cld ~/.local/bin/cld
 
 ### Check it works
 
@@ -71,39 +106,34 @@ If you'd rather not pipe a script into `sh` (read [install.sh](install.sh) first
 
     cld update
 
-It pulls the latest version and shows what changed. Other open terminals pick it up on their
-next `cld` call, no reload needed.
-
-### A model cld doesn't know yet
-
-`autocompact` words apply to the models listed in `cld.zsh`, which `cld update` keeps current.
-If a new model ships before that, add it in `~/.zshrc` (not in `cld.zsh`, so updates never conflict):
-
-    CLD_EXTRA_MODEL_IDS=(claude-opus-6-0)
+It pulls the latest version and shows what changed. Every open terminal has it at once.
 
 ### Uninstall
 
-Delete the cld line from `~/.zshrc`, then `rm -rf ~/cld`.
+    rm ~/.local/bin/cld && rm -rf ~/cld
+
+`rm -rf ~/.cld` also removes the kept Claudes, the cache and (on Linux) the saved token.
 
 ## What it prints
 
 Before claude starts, `cld` prints the run as pretty JSON (via `jq`): model, effort,
-autocompact, passthrough args, session ID, the `--settings` value laid out, and the exact
-`command` (shell-quoted, copy-pasteable). Bare `cld` prints nothing.
+autocompact, `temp` or the profile name with its config folder, passthrough args, session ID,
+and the exact `command` (shell-quoted, copy-pasteable; for `temp` and `as` it leaves out the
+login token). Bare `cld` prints nothing.
 
 When the session ends (`/exit`, Ctrl+D or Ctrl+C) it prints how to get back, with the same words:
 
     ↩ resume: cld sonnet high -- --resume 3f2a…
 
 New sessions get their ID from `cld` (`--session-id`); `-c`/`--resume` runs are looked up
-in `~/.claude/projects/<folder>/` after exit. `-p` runs and subcommands (`cld -- mcp list`)
-print no resume line.
+in `~/.claude/projects/<folder>/` after exit (for `cld as work`, in that Claude's own folder).
+`-p` runs, subcommands (`cld -- mcp list`) and `cld temp` print no resume line.
 
 ## Development
 
     make test     run sample calls against a stub `claude`; checks the JSON, resume line,
-                  exit code, extra model IDs, `cld update`, reload of open shells
-                  and install.sh
+                  exit code, models and effort read from claude, `temp`, `as`, login,
+                  `cld update` and install.sh
 
-When a new model version ships, add its full ID to `CLD_MODEL_IDS` in `cld.zsh` and push:
-users get it with `cld update`.
+`cld` is the command. `cld.zsh` only keeps installs from before the move working until the
+installer is run again.
