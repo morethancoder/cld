@@ -108,6 +108,14 @@ If you'd rather not pipe a script into `sh` (read [install.sh](install.sh) first
 
 It pulls the latest version and shows what changed. Every open terminal has it at once.
 
+`cld: unknown word 'update'` in a terminal that was open before the move to a command? That
+shell still holds the old `cld` function in memory, and `source ~/.zshrc` doesn't remove it.
+Drop it, then update:
+
+    unfunction cld; cld update
+
+Or start a fresh shell with `exec zsh`. New terminals are not affected.
+
 ### Uninstall
 
     rm ~/.local/bin/cld && rm -rf ~/cld
