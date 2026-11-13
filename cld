@@ -124,6 +124,7 @@ cld [words] [-- claude args]     one-off settings, nothing saved
   cld as work opus        the kept Claude called work, on Opus
   cld big -- -c           after --, args go straight to claude (here: continue last session)
   cld -c                  flags starting with - also pass through
+  cld sonnet -p "why?"    one answer printed, no session (words go before -p)
 
 cld models                models and versions your claude knows
 cld profiles              list the kept Claudes
@@ -131,7 +132,7 @@ cld drop <name>           delete a kept Claude
 cld login                 renew the login used by temp and as (asked for automatically once)
 cld update                get the latest cld
 
-Before it starts, cld prints the run as JSON (with the exact command).
+Before it starts, cld prints the run as JSON (with the exact command); -p runs skip it.
 When a session with a window word or as <name> ends, it prints the command to resume it
 (claude's own resume line would lose those).
 EOF
@@ -207,6 +208,7 @@ while (( $# )); do
     huge)  compact=800000; words+=$1 ;;
     <->k)  compact=$(( ${1%k} * 1000 )); words+=$1 ;;
     --)    shift; args+=("$@"); break ;;
+    -p|--print) args+=("$@"); break ;;        # a one-off answer: the prompt and the rest go to claude
     -*)    args+=("$1") ;;
     *)
       if (( ${efforts[(Ie)$1]} )); then
@@ -276,10 +278,10 @@ _cld_cleanup() {
 # Session ID. A new interactive session gets one from us, so it is exact.
 # Continue/resume runs pick their own, so we look it up after exit instead.
 # Print mode and subcommands start no session to come back to; temp sessions are deleted.
-sid="" track=1 lookup=0
+sid="" track=1 lookup=0 print=0
 for a in $args; do
   case $a in
-    -p|--print)                                   track=0 ;;
+    -p|--print)                                   track=0 print=1 ;;
     -c|--continue|-r|--resume|--resume=*|--session-id|--session-id=*|--fork-session) lookup=1 ;;
   esac
 done
@@ -290,7 +292,7 @@ if (( track && ! lookup )); then
 fi
 
 typeset -a cmd=(claude "${flags[@]}" "${args[@]}")
-if (( ${#words} + ${#args} )); then
+if (( ! print && ${#words} + ${#args} )); then   # a one-off answer prints only the answer
   line="${shown:+${(j: :)${(@q-)shown}} }${(j: :)${(@q-)cmd}}"
   if (( $+commands[jq] )); then
     color=-M; [[ -t 2 ]] && color=-C

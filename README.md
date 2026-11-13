@@ -8,6 +8,7 @@ Short for `claude`, with words for one-off settings. Nothing is written to setti
     cld temp                 a clean, throwaway Claude
     cld as work              a separate Claude that is kept
     cld big -- -c            after --, args go straight to claude
+    cld sonnet -p "why?"     one answer printed in the terminal, no session
 
 ## Models and effort
 
@@ -24,6 +25,14 @@ model, effort level or cld word is an error, so typos don't start a session.
 
 Autocompact words (`big`, `huge`, `350k`) apply to whichever model runs. Claude Code accepts
 100k to 1M.
+
+## One-off answers
+
+    cld -p "what does git rebase --onto do?"
+    cld haiku low -p "summarise this" < notes.txt > summary.txt
+
+`-p` (or `--print`) and everything after it go straight to claude, so put cld's words before
+it. Only the answer is printed: no JSON report and no resume line.
 
 ## Temporary and separate Claudes
 
@@ -127,7 +136,7 @@ Or start a fresh shell with `exec zsh`. New terminals are not affected.
 Before claude starts, `cld` prints the run as pretty JSON (via `jq`): model, effort,
 autocompact, `temp` or the profile name with its config folder, passthrough args, session ID,
 and the exact `command` (shell-quoted, copy-pasteable; for `temp` and `as` it leaves out the
-login token). Bare `cld` prints nothing.
+login token). Bare `cld` and `-p` runs print nothing of their own.
 
 Claude Code prints its own resume line when a session ends. It repeats `--model` and
 `--effort` but not the autocompact window (an env var, not saved with the session), and it

@@ -76,6 +76,12 @@ for words in "sonnet 200k" "opus max 600k" "big" "haiku 300k -- -c" "sonnet high
     check "no session ID or resume line" $(( ! ${#${(M)out:#*(session-id|↩)*}} ))
   fi
 done
+out=$(cld sonnet low -p "why is the sky blue" --output-format text 2>/dev/null </dev/null)
+check "-p without --: prompt and later flags reach claude" $(( $(grep -c -- '--model sonnet --effort low -p why is the sky blue --output-format text' $CLD_STUB_LOG) ))
+out=$(cld sonnet low -p hi 2>&1 </dev/null)
+check "-p run: no JSON report, even on stderr" $(( ! $(has "$out" "command") ))
+cld --print hi >/dev/null 2>&1 </dev/null
+check "--print works too" $(( $(grep -c -- '--print hi' $CLD_STUB_LOG) ))
 out=$(cld haiku 300k -- -c 2>&1 </dev/null)
 check "-c run finds the session ID after exit" $(has "$out" "↩ resume: cld haiku 300k -- --resume 11111111-2222-3333-4444-555555555555")
 rm -f $CLD_STUB_LOG; out=$(cld 2>&1 </dev/null); rc=$?
